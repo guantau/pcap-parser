@@ -3,14 +3,14 @@ from collections import OrderedDict
 import struct
 import sys
 
-from pcapparser import packet_parser
-from pcapparser import pcap, pcapng, utils
-from pcapparser.constant import FileFormat
-from pcapparser.printer import HttpPrinter
-from pcapparser.httpparser import HttpType, HttpParser
-from pcapparser import config
-from pcapparser.packet_parser import TcpPack
-from pcapparser.utils import is_request
+import packet_parser
+import pcap, pcapng, utils
+from constant import FileFormat
+from printer import HttpPrinter
+from httpparser import HttpType, HttpParser
+import config
+from packet_parser import TcpPack
+from utils import is_request
 
 
 def get_file_format(infile):
@@ -68,6 +68,7 @@ class Stream(object):
         new_data = []
         last_packet_seq = None
         for packet in data:
+            # remove duplicated packets
             if packet.seq != last_packet_seq:
                 last_packet_seq = packet.seq
                 new_data.append(packet)
@@ -86,7 +87,7 @@ class TcpConnection(object):
         self.is_http = None
         self.processor = HttpPrinter((packet.source, packet.source_port),
                                      (packet.dest, packet.dest_port))
-        self.http_parser = HttpParser(self.processor)
+        self.http_parser = HttpParser(self.processor, packet.micro_second)
         self.on_packet(packet)
 
     def on_packet(self, packet):
@@ -116,7 +117,7 @@ class TcpConnection(object):
             packets = confirm_stream.retrieve_packet(packet.ack_seq)
             if packets:
                 for packet in packets:
-                    self.http_parser.send(pac_type, packet.body)
+                    self.http_parser.send(pac_type, packet.body, packet.micro_second)
         if packet.fin:
             send_stream.status = 1
 
@@ -156,6 +157,7 @@ def parse_pcap_file(infile):
         if key in conn_dict:
             conn_dict[key].on_packet(tcp_pac)
             # conn closed.
+            # TODO: The connection should be closed after an expired time
             if conn_dict[key].closed():
                 conn_dict[key].finish()
                 del conn_dict[key]
@@ -165,6 +167,7 @@ def parse_pcap_file(infile):
             conn_dict[key] = TcpConnection(tcp_pac)
         elif utils.is_request(tcp_pac.body):
             # tcp init before capture, we start from a possible http request header.
+            # TODO: The packet maybe a http response header
             conn_dict[key] = TcpConnection(tcp_pac)
 
     # finish connection which not close yet

@@ -4,13 +4,13 @@ __author__ = 'dongliu'
 
 import struct
 import socket
-from pcapparser.constant import *
+from constant import *
 
 
 class TcpPack:
     """ a tcp packet, header fields and data. """
 
-    def __init__(self, source, source_port, dest, dest_port, flags, seq, ack_seq, body):
+    def __init__(self, micro_second, source, source_port, dest, dest_port, flags, seq, ack_seq, body):
         self.source = source
         self.source_port = source_port
         self.dest = dest
@@ -20,7 +20,7 @@ class TcpPack:
         self.ack_seq = ack_seq
         self.body = body
         self.key = None
-        self.micro_second = None
+        self.micro_second = micro_second
 
         self.fin = flags & 1
         self.syn = (flags >> 1) & 1
@@ -162,7 +162,7 @@ def read_tcp_packet(read_packet):
         # tcp
         if transport_protocol == TransferProtocol.TCP:
             source_port, dest_port, flags, seq, ack_seq, body = parse_tcp_packet(ip_body)
-            yield TcpPack(source, source_port, dest, dest_port, flags, seq, ack_seq, body)
+            yield TcpPack(micro_second, source, source_port, dest, dest_port, flags, seq, ack_seq, body)
         elif transport_protocol == TransferProtocol.UDP:
             # source_port, dest_port, udp_body = parse_udp_packet(ip_body)
             continue

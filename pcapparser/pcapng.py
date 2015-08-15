@@ -5,8 +5,8 @@
 from __future__ import unicode_literals, print_function, division
 import struct
 import sys
-from pcapparser import six
-from pcapparser.constant import *
+import six
+from constant import *
 
 __author__ = 'dongliu'
 

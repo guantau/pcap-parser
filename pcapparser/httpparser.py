@@ -2,17 +2,17 @@ from __future__ import unicode_literals, print_function, division
 
 from collections import defaultdict
 
-from pcapparser import utils
-from pcapparser.constant import HttpType, Compress
-from pcapparser.reader import DataReader
-from pcapparser import config
-
+import utils
+from constant import HttpType, Compress
+from reader import DataReader
+import config
 
 __author__ = 'dongliu'
 
 
 class HttpRequestHeader(object):
     def __init__(self):
+        self.micro_second = 0
         self.content_len = 0
         self.method = b''
         self.host = b''
@@ -29,6 +29,7 @@ class HttpRequestHeader(object):
 
 class HttpResponseHeader(object):
     def __init__(self):
+        self.micro_second = 0
         self.content_len = 0
         self.status_line = None
         self.status_code = None
@@ -52,7 +53,7 @@ class RequestMessage(object):
 class HttpParser(object):
     """parse http req & resp"""
 
-    def __init__(self, processor):
+    def __init__(self, processor, micro_second):
         """
         :type processor: HttpDataProcessor
         """
@@ -60,12 +61,14 @@ class HttpParser(object):
         self.inited = False
         self.is_http = False
         self.worker = None
+
+        self.micro_second = micro_second
         self.processor = processor
 
         self.cur_data = None
         self.message = RequestMessage()
 
-    def send(self, http_type, data):
+    def send(self, http_type, data, micro_second):
         if not self.inited:
             self._init(http_type, data)
             self.inited = True
@@ -78,6 +81,8 @@ class HttpParser(object):
             self.cur_data.append(data)
             return
 
+        # when http_type is changed, we have collect enough data
+        # TODO: if some packets didn't arrive in a right order, we will lose some data
         if self.cur_data is not None:
             reader = DataReader(self.cur_data)
             if self.cur_type == HttpType.REQUEST:
@@ -90,6 +95,10 @@ class HttpParser(object):
         # new http request/response
         self.cur_data = []
         self.cur_data.append(data)
+
+        # record new http request timestamp
+        if self.cur_type == HttpType.REQUEST:
+            self.micro_second = micro_second
 
     def _init(self, http_type, data):
         if not utils.is_request(data) or http_type != HttpType.REQUEST:
@@ -154,12 +163,16 @@ class HttpParser(object):
         if b"transfer-encoding" in header_dict and b'chunked' in header_dict[b"transfer-encoding"]:
             req_header.chunked = True
         req_header.content_type = header_dict[b'content-type']
-        req_header.compress = utils.get_compress_type(header_dict[b"content-encoding"])
+        if b"content-encoding" in header_dict:
+            req_header.compress = utils.get_compress_type(header_dict[b"content-encoding"])
+        else:
+            req_header.compress = Compress.IDENTITY
         req_header.host = header_dict[b"host"]
         if b'expect' in header_dict:
             req_header.expect = header_dict[b'expect']
 
         req_header.raw_data = b'\n'.join(lines)
+        req_header.micro_second = self.micro_second
         return req_header
 
     def read_http_resp_header(self, reader):
@@ -182,12 +195,18 @@ class HttpParser(object):
         header_dict = self.read_headers(reader, lines)
         if b"content-length" in header_dict:
             resp_header.content_len = int(header_dict[b"content-length"])
+            header_dict[b"content-length"] = int(header_dict[b"content-length"])
         if b"transfer-encoding" in header_dict and b'chunked' in header_dict[b"transfer-encoding"]:
             resp_header.chunked = True
         resp_header.content_type = header_dict[b'content-type']
-        resp_header.compress == utils.get_compress_type(header_dict[b"content-encoding"])
+        if b"content-encoding" in header_dict:
+            resp_header.compress = utils.get_compress_type(header_dict[b"content-encoding"])
+        else:
+            resp_header.compress = Compress.IDENTITY
         resp_header.connection_close = (header_dict[b'connection'] == b'close')
+
         resp_header.raw_data = b'\n'.join(lines)
+        resp_header.micro_second = self.micro_second
         return resp_header
 
     def read_chunked_body(self, reader, skip=False):

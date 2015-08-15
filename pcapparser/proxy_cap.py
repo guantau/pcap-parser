@@ -1,5 +1,5 @@
 from __future__ import unicode_literals, print_function, division
-from pcapparser.printer import HttpPrinter
+from printer import HttpPrinter
 
 __author__ = "dongliu"
 

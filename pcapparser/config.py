@@ -15,10 +15,11 @@ class ParseConfig(object):
     """ global settings """
 
     def __init__(self):
-        self.level = OutputLevel.ONLY_URL
-        self.pretty = False
+        self.level = OutputLevel.ALL_BODY
+        self.pretty = True
         self.encoding = None
         self.group = False
+        self.mongo = True
 
 
 _parse_config = ParseConfig()

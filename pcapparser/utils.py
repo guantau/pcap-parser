@@ -1,7 +1,8 @@
+# -*- coding: utf-8 -*-
 from __future__ import unicode_literals, print_function, division
 import zlib
-from pcapparser import six
-from pcapparser.constant import Compress
+import six
+from constant import Compress
 
 __author__ = 'dongliu'
 
@@ -32,7 +33,7 @@ def try_print_json(text, output_file):
     try:
         data = json.loads(text)
         output_file.write(
-            json.dumps(data, indent=2, ensure_ascii=False, separators=(',', ': ')))
+            json.dumps(data, ensure_ascii=False, separators=(', ', ':')))
         return True
     except Exception:
         output_file.write(text)
@@ -69,7 +70,7 @@ def gzipped(content):
 
 
 def ungzip(content):
-    """ungzip content"""
+    """unzip content"""
     try:
         buf = BytesIO(content)
         gzip_file = gzip.GzipFile(fileobj=buf)
@@ -159,10 +160,7 @@ def decode_body(content, charset):
         return ''
     if charset:
         charset = six.ensure_unicode(charset)
-        try:
-            return content.decode(charset)
-        except:
-            return '{decode content failed with charset: %s}' % charset
+        return content.decode(charset, errors='ignore')
 
     # todo: encoding detect
     try:
@@ -173,4 +171,5 @@ def decode_body(content, charset):
         return content.decode('gb18030')
     except:
         pass
+
     return '{decode content failed, unknown charset}'

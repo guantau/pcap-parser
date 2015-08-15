@@ -1,23 +1,31 @@
+# -*- coding: utf-8 -*-
 from __future__ import unicode_literals, print_function, division
 
 from io import StringIO
 import sys
 
-from pcapparser.config import OutputLevel
+from config import OutputLevel
 # print http req/resp
-from pcapparser import utils, six
-from pcapparser import config
+import utils, six
+import config
 import threading
-from pcapparser.constant import Compress
+import urllib
+from constant import Compress
+from pyconnect import PyConnect
+
+
+connect = PyConnect('localhost', 27017)
+connect.use('http')
+connect.setCollection('metadata')
 
 printer_lock = threading.Lock()
 
 
 def _get_full_url(uri, host):
     if uri.startswith(b'http://') or uri.startswith(b'https://'):
-        return uri
+        return urllib.unquote(uri)
     else:
-        return b'http://' + host + uri
+        return urllib.unquote(b'http://' + host + uri)
 
 
 class HttpPrinter(object):
@@ -32,59 +40,84 @@ class HttpPrinter(object):
         :type req_header: HttpRequestHeader
         :type req_body: bytes
         """
-        if self.parse_config.level == OutputLevel.ONLY_URL:
-            self._println(req_header.method + b" " + _get_full_url(req_header.uri, req_header.host))
-        elif self.parse_config.level == OutputLevel.HEADER:
-            self._println(req_header.raw_data)
-            self._println()
-        elif self.parse_config.level >= OutputLevel.TEXT_BODY:
-            self._println(req_header.raw_data)
-            self._println()
+        mime, charset = utils.parse_content_type(req_header.content_type)
+        if self.parse_config.encoding and not charset:
+            charset = self.parse_config.encoding
+        if req_header.compress == Compress.IDENTITY:
+            # if is gzip by content magic header
+            # someone missed the content-encoding header
+            if utils.gzipped(req_body):
+                req_header.compress = Compress.GZIP
 
-            mime, charset = utils.parse_content_type(req_header.content_type)
-            # usually charset is not set in http post
-            output_body = self._if_output(mime)
-            if self.parse_config.encoding and not charset:
-                charset = self.parse_config.encoding
-            if req_header.compress == Compress.IDENTITY:
-                # if is gzip by content magic header
-                # someone missed the content-encoding header
-                if utils.gzipped(req_body):
-                    req_header.compress = Compress.GZIP
-            if output_body:
-                self._print_body(req_body, req_header.compress, mime, charset)
-                self._println('')
+        if self.parse_config.mongo:
+            filter = {b"micro_second":req_header.micro_second,
+                      b"client_ip":self.client_host[0], b"client_port":self.client_host[1],
+                      b"remote_ip":self.remote_host[0], b"remote_port":self.remote_host[1]}
+            doc = dict()
+            doc[b"req_url"] = req_header.method + b" " + _get_full_url(req_header.uri, req_header.host)
+            doc[b"req_header"] = req_header.raw_data
+            content = self._decode_body(req_body, req_header.compress, mime, charset)
+            if content:
+                doc[b"req_body"] = content
+            connect.update(filter, doc)
+        else:
+            if self.parse_config.level == OutputLevel.ONLY_URL:
+                self._println(req_header.method + b" " + _get_full_url(req_header.uri, req_header.host))
+            elif self.parse_config.level == OutputLevel.HEADER:
+                self._println(req_header.raw_data)
+                self._println()
+            elif self.parse_config.level >= OutputLevel.TEXT_BODY:
+                self._println(req_header.raw_data)
+                self._println()
+
+                # usually charset is not set in http post
+                output_body = self._if_output(mime)
+                if output_body:
+                    self._print_body(req_body, req_header.compress, mime, charset)
+                    self._println('')
 
     def on_http_resp(self, resp_header, resp_body):
         """
         :type resp_header: HttpResponseHeader
         :type resp_body: bytes
         """
-        if self.parse_config.level == OutputLevel.ONLY_URL:
-            self._println(resp_header.status_line)
-        elif self.parse_config.level == OutputLevel.HEADER:
-            self._println(resp_header.raw_data)
-            self._println()
-        elif self.parse_config.level >= OutputLevel.TEXT_BODY:
-            self._println(resp_header.raw_data)
-            self._println()
 
-            mime, charset = utils.parse_content_type(resp_header.content_type)
-            # usually charset is not set in http post
-            output_body = self._if_output(mime)
-            if self.parse_config.encoding and not charset:
-                charset = self.parse_config.encoding
-            if resp_header.compress == Compress.IDENTITY:
-                # if is gzip by content magic header
-                # someone missed the content-encoding header
-                if utils.gzipped(resp_body):
-                    resp_header.compress = Compress.GZIP
-            if output_body:
-                self._print_body(resp_body, resp_header.compress, mime, charset)
+        mime, charset = utils.parse_content_type(resp_header.content_type)
+        # usually charset is not set in http post
+        if self.parse_config.encoding and not charset:
+            charset = self.parse_config.encoding
+        if resp_header.compress == Compress.IDENTITY:
+            # if is gzip by content magic header
+            # someone missed the content-encoding header
+            if utils.gzipped(resp_body):
+                resp_header.compress = Compress.GZIP
+
+        if self.parse_config.mongo:
+            filter = {b"micro_second":resp_header.micro_second,
+                      b"client_ip":self.client_host[0], b"client_port":self.client_host[1],
+                      b"remote_ip":self.remote_host[0], b"remote_port":self.remote_host[1]}
+            doc = dict()
+            doc[b"resp_header"] = resp_header.raw_data
+            content = self._decode_body(resp_body, resp_header.compress, mime, charset)
+            if content:
+                doc[b"resp_body"] = content
+            connect.update(filter, doc)
+        else:
+            if self.parse_config.level == OutputLevel.ONLY_URL:
+                self._println(resp_header.status_line)
+            elif self.parse_config.level == OutputLevel.HEADER:
+                self._println(resp_header.raw_data)
                 self._println()
+            elif self.parse_config.level >= OutputLevel.TEXT_BODY:
+                self._println(resp_header.raw_data)
+                self._println()
+                output_body = self._if_output(mime)
+                if output_body:
+                    self._print_body(resp_body, resp_header.compress, mime, charset)
+                    self._println()
 
-        if not config.get_config().group:
-            self._do_output()
+            if not config.get_config().group:
+                self._do_output()
 
     def finish(self):
         """called when this connection finished"""
@@ -129,6 +162,12 @@ class HttpPrinter(object):
             self._println(line)
 
     def _print_body(self, body, compress, mime, charset):
+        content = self._decode_body(body, compress, mime, charset)
+        if content:
+            self.buf.write(content)
+            self.buf.write('\n')
+
+    def _decode_body(self, body, compress, mime, charset):
         if compress == Compress.GZIP:
             body = utils.ungzip(body)
         elif compress == Compress.DEFLATE:
@@ -144,12 +183,11 @@ class HttpPrinter(object):
             if mime is None:
                 mime = b''
             if self.parse_config.pretty:
+                bodybuf = StringIO()
                 if b'json' in mime:
-                    utils.try_print_json(content, self.buf)
+                    utils.try_print_json(content, bodybuf)
+                    content = bodybuf.getvalue()
                 elif b'www-form-urlencoded' in mime:
-                    utils.try_decoded_print(content, self.buf)
-                else:
-                    self.buf.write(content)
-            else:
-                self.buf.write(content)
-            self.buf.write('\n')
+                    utils.try_decoded_print(content, bodybuf)
+                    content = bodybuf.getvalue()
+        return content

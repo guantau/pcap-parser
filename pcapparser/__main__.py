@@ -5,8 +5,8 @@ import sys
 import argparse
 import io
 
-from pcapparser.parse_pcap import parse_pcap_file
-from pcapparser import config
+from parse_pcap import parse_pcap_file
+import config
 
 
 # when press Ctrl+C
@@ -49,7 +49,8 @@ def main():
         parse_config.level = args.verbosity
     if args.encoding:
         parse_config.encoding = args.encoding
-    parse_config.pretty = args.beauty
+    if args.beauty:
+        parse_config.pretty = args.beauty
     parse_config.group = args.group
 
     if args.output:
